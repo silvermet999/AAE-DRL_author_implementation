@@ -5,16 +5,14 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data
-from torch.nn.functional import one_hot
 
 import utils
-from EnvClass import Env
+from DRL.EnvClass import Env
 from AAE import AAE_archi_opt
 from clfs import classifier
-from data import main_u
 
 from utils import RL_dataloader
-from RL import TD3
+from DRL.RL import TD3
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
@@ -23,19 +21,12 @@ torch.cuda.empty_cache()
 torch.manual_seed(0)
 
 class Tester(object):
-    def __init__(self, test_loader, model_encoder, model_decoder, model_disc, classifier, discrete):
-
+    def __init__(self, test_loader, model_encoder, model_decoder, model_disc, classifier, in_out, discrete, actor_path,
+                 critic_path):
 
         self.test_loader = RL_dataloader(test_loader)
 
-        self.max_timesteps = 10000
-
-        self.batch_size = 32
-        self.eval_freq = 100
-        self.start_timesteps = 50
-        self.max_episodes_steps = 1000
-
-        self.expl_noise = 0.3
+        # self.expl_noise = 0.3
 
         self.encoder = model_encoder
         self.discriminator = model_disc
@@ -55,19 +46,19 @@ class Tester(object):
         self.policy = TD3(self.state_dim, self.action_dim, self.discrete_features, self.max_action)
 
         self.continue_timesteps = 0
-
+        self.actor_path = actor_path
+        self.critic_path = critic_path
         self.evaluations = []
 
 
 
     def evaluate(self):
         episode_num = 0
-        number_correct = 0
+        self.policy.load_model(self.actor_path, self.critic_path)
+
         while True:
-            print('input loader')
             try:
                 state_t, label = self.test_loader.next_data()
-                # episode_target = (torch.randint(4, label.shape) + label) % 4
                 state = self.env.set_state(state_t)
                 done = False
                 episode_return = 0
@@ -87,52 +78,9 @@ class Tester(object):
             self.env.reset()
 
             with torch.no_grad():
+                old_state = self.encoder(torch.tensor(state_t).cuda().float() if cuda else torch.tensor(state).float())
                 new_state = self.encoder(torch.tensor(state).cuda() if cuda else torch.tensor(state))
-                labels = one_hot(label, num_classes=4).cuda() if cuda else one_hot(label, num_classes=4)
 
-                nd, nc, nb = self.decoder((torch.cat([new_state, labels.squeeze(1)], dim=1).cuda() if cuda else
-                                      torch.cat([new_state, labels.squeeze(1)], dim=1)))
-
-            yield nd, nc, nb, episode_return
+            yield old_state, new_state, episode_return
 
 
-
-in_out = 30
-z_dim = 10
-label_dim = 4
-
-discrete = {
-    "ct_state_ttl": 6,
-            "trans_depth": 11,
-            "proto": 2,
-}
-
-
-dataset = utils.dataset(original=True, train=False)
-test_loader =utils.dataset_function(dataset, 32, 64, train=False)
-
-encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
-    AAE_archi_opt.EncoderGenerator(in_out, z_dim))
-encoder_generator.eval()
-
-
-decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary).cuda() if cuda else (
-    AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary))
-decoder.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/aae3.pth")["dec"])
-decoder.eval()
-
-
-discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
-    AAE_archi_opt.Discriminator(z_dim, ))
-discriminator.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/AAE/aae3.pth")["disc"])
-discriminator.eval()
-
-
-classifier_model = classifier.TabNetModel().cuda() if cuda else classifier.TabNetModel()
-classifier_model.load_state_dict(torch.load("/home/silver/PycharmProjects/AAEDRL/clfs/best_model_rl1.pth"))
-classifier_model.eval()
-
-tester = Tester(test_loader, encoder_generator, decoder, discriminator, classifier_model, discrete)
-evaluater = tester.evaluate()
-for i in range(100):
-    next(evaluater)
