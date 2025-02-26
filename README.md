@@ -5,7 +5,7 @@ We used the UNSW-NB15 dataset, the final version of the dataset (joined, cleaned
 
 # AAE training and testing
 To train the AAE model on the unaugmented dataset, we use:
-
+```bash
 python AAE_main.py --train
 
 To test the AAE model on the unaugmented dataset, we use:
