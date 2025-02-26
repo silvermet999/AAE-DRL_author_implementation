@@ -3,7 +3,7 @@ from collections import defaultdict
 from scipy import stats
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, MaxAbsScaler, MinMaxScaler
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.feature_selection import RFE, RFECV
 from sklearn.svm import SVR
 
@@ -13,6 +13,8 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 from fitter import Fitter, get_common_distributions
 import warnings
 
+from ydata_profiling import ProfileReport
+
 warnings.filterwarnings('ignore')
 
 
@@ -20,6 +22,8 @@ warnings.filterwarnings('ignore')
 
 
 """--------------------------------------------data exploration/cleaning--------------------------------------------"""
+
+"""Read CSV files and join datasets"""
 train = pd.read_csv('/home/silver/UNSW_NB15_training-set.csv')
 test = pd.read_csv('/home/silver/UNSW_NB15_testing-set.csv')
 extra = pd.read_csv("/home/silver/PycharmProjects/AAEDRL/data/dataset.csv")
@@ -32,26 +36,31 @@ extra = extra.rename(columns={
 
 dfs = [train, test, extra]
 df = pd.concat(dfs, ignore_index=True)
-df = df.drop(df.columns[df.nunique() == 1], axis = 1) # no change
-df = df.drop(df.columns[df.nunique() == len(df)], axis = 1) # no change
+
+
+"""Clean dataset"""
+# Check for all unique and one unique values in each column
+df = df.drop(df.columns[df.nunique() == 1], axis = 1)
+df = df.drop(df.columns[df.nunique() == len(df)], axis = 1)
+
+# Drop non common columns between datasets
 df = df.drop(["id", "rate"], axis=1)
 
+# This column is supposedly binary => https://unsw-my.sharepoint.com/:x:/r/personal/z5025758_ad_unsw_edu_au/_layouts/15/Doc.aspx?sourcedoc=%7B975B24E4-7E36-4CE1-B98A-9FBE4BB521B7%7D&file=NUSW-NB15_features.csv&action=default&mobileredirect=true
 df["is_ftp_login"] = df["is_ftp_login"].replace([4, 2], 1).astype(int)
 
+# Drop null values
 df = df[df['proto'] != 'a/n']
 df = df[df['service'] != '-']
 df = df[df["state"] != "no"]
 
-# df["proto"].replace("a/n", np.nan, inplace=True)
-# df["service"].replace("-", np.nan, inplace=True)
-# df["state"].replace("no", np.nan, inplace=True)
-
-
+# Discard spaces
 df["attack_cat"] = df["attack_cat"].replace([' Fuzzers', ' Fuzzers '], "Fuzzers")
 df["attack_cat"] = df["attack_cat"].replace("Backdoors", "Backdoor")
 df["attack_cat"] = df["attack_cat"].replace(" Reconnaissance ", "Reconnaissance")
 df["attack_cat"] = df["attack_cat"].replace(" Shellcode ", "Shellcode")
 
+# Encode categorical columns (for visualization)
 le = LabelEncoder()
 cols_le = ["attack_cat", "proto", "service", "state"]
 mappings = {}
@@ -63,13 +72,28 @@ for col in cols_le:
 # for col, mapping in mappings.items():
 #     print(f"Mapping for {col}: {mapping}")
 
+# Discard singletons
 for col in cols_le:
     value_counts = df[col].value_counts()
     singletons = value_counts[value_counts == 1].index
     df = df[~df[col].isin(singletons)]
 
+# Outlier capping (was not applied)
+def cap_outliers_iqr(df, factor=40):
+    capped_df = df.copy()
+    for column in df.select_dtypes(include=[np.number]).columns:
+        Q1 = df[column].quantile(0.25)
+        Q3 = df[column].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_threshold = Q1 - factor * IQR
+        upper_threshold = Q3 + factor * IQR
+        print(lower_threshold)
+        print(upper_threshold)
+        capped_df[column] = np.where(df[column] < lower_threshold, lower_threshold, df[column])
+        capped_df[column] = np.where(capped_df[column] > upper_threshold, upper_threshold, capped_df[column])
+    return capped_df
 
-
+# Correlation analysis
 def corr(df):
     correlation = df.corr()
     f_corr = {}
@@ -86,9 +110,17 @@ def corr(df):
     plt.savefig("corr.png")
     return f_corr
 
+# Get portfolio
+# profiler = ProfileReport(df)
+# profiler.to_file("report.html")
+
+# Drop non-important features according to RFE
 df = df.drop(["service", "dttl", "sttl", "is_sm_ips_ports", 'ct_ftp_cmd', 'ct_flw_http_mthd', "dload", "stcpb", "dtcpb",
               "dmean", "ct_dst_src_ltm"], axis=1)
 
+"""------------------------------------------------data preprocessing------------------------------------------------"""
+
+# Balance dataset
 normal = df[df['attack_cat'].isin([6])]
 noridx = normal.tail(240000).index
 df = df.drop(noridx)
@@ -99,29 +131,26 @@ df["attack_cat"] = df["attack_cat"].replace([2, 4, 7, 0, 8, 1], 0)
 df["attack_cat"] = df["attack_cat"].replace(5, 1)
 df["attack_cat"] = df["attack_cat"].replace(3, 2)
 df["attack_cat"] = df["attack_cat"].replace(6, 3)
-# profiler = ProfileReport(df)
-# profiler.to_file("report.html")
 
-"""-----------------------------------------------vertical data split-----------------------------------------------"""
+# Train test split
 def vertical_split(X, y):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=45)
     return X_train, X_test, y_train, y_test
-
 
 X = df.drop(["attack_cat", "label"], axis = 1)
 y = df["attack_cat"]
 
 X_train, X_test, y_train, y_test = vertical_split(X, y)
 
+# Data type separation
 def df_type_split(df):
-    X_cont = df.drop(['state', 'ct_state_ttl', "trans_depth", "proto", "is_ftp_login",
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
+    X_cont = df.drop(['state', 'ct_state_ttl', "trans_depth", "proto", "is_ftp_login"
                       ], axis=1)
     X_disc = df[['state', 'ct_state_ttl', "trans_depth", "proto", "is_ftp_login"
-                      # 'service', 'dttl', "is_sm_ips_ports", "ct_ftp_cmd", "ct_flw_http_mthd", 'sttl',
                       ]]
     return X_disc, X_cont
 
+# Feature scaling
 def prep(X_disc, X_cont):
     cont_cols = X_cont.columns
     cont_index = X_cont.index
@@ -139,7 +168,7 @@ X_sc = prep(X_disc, X_cont)
 X_train_sc = prep(X_disc_train, X_cont_train)
 X_test_sc = prep(X_disc_test, X_cont_test)
 
-
+# Dimensionality reduction
 def optimize_features_rfe(X, y):
     estimator = SVR(kernel="linear")
     cv = StratifiedKFold(n_splits=5)
@@ -149,41 +178,3 @@ def optimize_features_rfe(X, y):
     # selector.fit(X, y)
     return rfecv.ranking_
 
-
-#
-def kolmogorov_smirnov_test(column, dist='norm'):
-    D, p_value = stats.kstest(column, dist)
-    return p_value > 0.05
-
-def anderson_darling_test(column, dist='norm'):
-    result = stats.anderson(column, dist=dist)
-    return result.statistic < result.critical_values[2]
-
-def fit_distributions(column):
-    f = Fitter(column, distributions=get_common_distributions())
-    f.fit()
-    f.summary()
-    best_fit = f.get_best(method='sumsquare_error')
-
-    return best_fit
-
-# results = {}
-#
-# for idx, column in enumerate(X_train_sc.columns):
-#     col_results = []
-#     if kolmogorov_smirnov_test(X_train_sc[column]):
-#         col_results.append(f"Column {column} follows the specified distribution (Kolmogorov-Smirnov test).")
-#     if anderson_darling_test(X_train_sc[column]):
-#         col_results.append(f"Column {column} follows the specified distribution (Anderson-Darling test).")
-#     best_fit = fit_distributions(X_train_sc[column])
-#     col_results.append(f"{best_fit}")
-#     results[idx] = col_results
-#
-# for idx in range(31):
-#     if idx in results:
-#         print(f"{idx}")
-#         for result in results[idx]:
-#             print(result)
-#         print()
-#     else:
-#         print(f"{idx}: No data\n")
