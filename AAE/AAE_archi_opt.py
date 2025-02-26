@@ -1,16 +1,16 @@
-import pandas as pd
+"""-------------------------------------------------Import libraries-------------------------------------------------"""
 import torch
 from torch import exp
 from torch.nn import ModuleDict, Linear, LeakyReLU, BatchNorm1d, Module, Sigmoid, Sequential, Tanh, Dropout, Softmax, \
     MSELoss, CrossEntropyLoss, BCELoss, ReLU
 
-import utils
-from data import main_u
-
+# Check cuda
 cuda = True if torch.cuda.is_available() else False
 
 
+"""---------------------------------------------------Build Model----------------------------------------------------"""
 
+# Attention mechanism for discriminator
 class Attention(Module):
     def __init__(self, in_features, attention_size):
         super(Attention, self).__init__()
@@ -26,7 +26,7 @@ class Attention(Module):
         weighted_input = x * attn_score
         return weighted_input
 
-
+# Latent vector
 def reparameterization(mu, logvar, z_dim):
     std = exp(logvar / 2)
     sampled_z = torch.rand(mu.size(0), z_dim).cuda() if cuda else torch.rand(mu.size(0), z_dim)
@@ -34,6 +34,12 @@ def reparameterization(mu, logvar, z_dim):
     return z
 
 
+"""
+Encoder/Generator
+------------------
+Input: Feature dimension
+Output: Latent vector
+"""
 class EncoderGenerator(Module):
     def __init__(self, in_out, z_dim):
         super(EncoderGenerator, self).__init__()
@@ -68,7 +74,12 @@ class EncoderGenerator(Module):
         z = reparameterization(mu, logvar, self.z_dim)
         return z
 
-
+"""
+Decoder
+-------
+Input: Latent vector dim
+Output: Reconstructed feature dim
+"""
 class Decoder(Module):
     def __init__(self, dim, in_out, discrete_features, continuous_features, binary_features):
         super(Decoder, self).__init__()
@@ -152,8 +163,12 @@ class Decoder(Module):
         return total_loss
 
 
-
-
+"""
+Discriminator
+-------------
+Input: Latent vector dim
+Output: Binary prediction
+"""
 class Discriminator(Module):
     def __init__(self, dim):
         super(Discriminator, self).__init__()
