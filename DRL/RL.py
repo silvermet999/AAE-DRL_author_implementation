@@ -191,3 +191,11 @@ class TD3(object):
 
     def store_transition(self, state, continuous_action, discrete_actions, next_state, reward, done, target):
         self.replay_buffer.add((state, continuous_action, discrete_actions, next_state, reward, done, target))
+
+    def save_model(self, actor_path, critic_path):
+        torch.save(self.actor.state_dict(), f"{actor_path}")
+        torch.save(self.critic.state_dict(), f"{critic_path}")
+
+    def load_model(self, actor_path, critic_path):
+        self.actor.load_state_dict(torch.load(f"{actor_path}"))
+        self.critic.load_state_dict(torch.load(f"{critic_path}"))
