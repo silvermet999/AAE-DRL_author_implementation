@@ -7,46 +7,31 @@ from xgboost import XGBClassifier
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import cross_val_predict
 
-import utils
-from data import main_u
 from sklearn.neighbors import KNeighborsClassifier
 
 
-
-df = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/AAE/ds_fin2.csv"))
-df_disc, df_cont = main_u.df_type_split(df)
-_, mainX_cont = main_u.df_type_split(main_u.X)
-X_inv = utils.inverse_sc_cont(mainX_cont, df_cont)
-X = df_disc.join(X_inv)
-
-y_rl = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/clfs/labels.csv"))
-y_rl = y_rl[y_rl["attack_cat"] != 2]
-y = pd.concat([y_rl, main_u.y], axis=0)
-y = y.squeeze()
-
-
-X_train, X_test, y_train, y_test = main_u.vertical_split(X, y[:173252])
-dtrain = xgb.DMatrix(X_train, label=y_train)
-dvalid = xgb.DMatrix(X_test, label=y_test)
-
-def clf_class(xgb_clf=False, KNN_clf=False, rf_clf=False):
+def clf_class(X_train, X_test, y_train, y_test, xgb_clf=False, KNN_clf=False, rf_clf=False):
     if xgb_clf:
         print("using XGB")
         best_params = {'booster': 'gbtree', 'lambda': 0.27402306472106963, 'alpha': 1.0337469639524462e-07,
                        'subsample': 0.8763224738010359, 'colsample_bytree': 0.8497549372024669, 'max_depth': 18,
                        'min_child_weight': 3, 'eta': 0.17676685584319898, 'gamma': 4.5337669584553865e-07,
                        'grow_policy': 'lossguide', "verbosity": 0, "objective": "multi:softmax", "num_class": 30}
+        # best_params = {'booster': 'gbtree', 'lambda': 1.1068723944171659e-08, 'alpha': 8.160758817453953e-08,
+        # 'subsample': 0.7402331626687324, 'colsample_bytree': 0.5025353594627584, 'max_depth': 22, 'min_child_weight': 2,
+        # 'eta': 0.050901063251071806, 'gamma': 5.515409506712251e-08, 'grow_policy': 'lossguide', "verbosity": 0,
+        # "objective": "multi:softmax", "num_class": 30}
         clf = XGBClassifier(**best_params)
 
     elif KNN_clf:
         print("using KNN")
-        clf = KNeighborsClassifier(n_neighbors= 15, metric= 'manhattan', leaf_size= 11)
+        clf = KNeighborsClassifier(n_neighbors= 15, metric= 'manhattan', leaf_size= 11) # 'n_neighbors': 27, 'metric': 'manhattan', 'leaf_size': 64
     elif rf_clf:
         print("using RF")
-        clf = RandomForestClassifier(max_depth=15, n_estimators=186)
+        clf = RandomForestClassifier(max_depth=15, n_estimators=186) # 'max_depth': 14, 'n_estimators': 177
     else:
         print("using GB")
-        clf = GradientBoostingClassifier(n_estimators=12, learning_rate=0.08372870472978572, max_depth=15)
+        clf = GradientBoostingClassifier(n_estimators=15, learning_rate=0.08372870472978572, max_depth=12) # 'n_estimators': 26, 'learning_rate': 0.03515322582815399, 'max_depth': 10
 
     clf.fit(X_train, y_train)
     y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
@@ -65,10 +50,13 @@ def clf_class(xgb_clf=False, KNN_clf=False, rf_clf=False):
 
 
     if xgb_clf:
+        dtrain = xgb.DMatrix(X_train, label=y_train)
+        dvalid = xgb.DMatrix(X_test, label=y_test)
         test_clf = xgb.train(best_params, dtrain)
         y_pred_val = test_clf.predict(dvalid)
 
     else :
         y_pred_val = clf.predict(X_test)
     report_test = classification_report(y_test, y_pred_val)
+    print(report_test)
     return macro_auc, report_test
