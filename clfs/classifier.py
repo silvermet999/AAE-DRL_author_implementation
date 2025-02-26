@@ -228,74 +228,68 @@ class TabNetModel(nn.Module):
         return logits, predictions
 
 
-original_ds = utils.dataset(original=True)
-train_loader, val_loader = utils.dataset_function(original_ds, 32, 64, train=True)
-original_ds_t = utils.dataset(original=True, train=False)
-test_loader = utils.dataset_function(original_ds_t, 32, 64, train=False)
+# classifier and optimizer
 classifier = TabNetModel().to(device)
 optimizer = torch.optim.SGD(classifier.parameters(), lr=0.001)
 
-df_synth = pd.DataFrame(pd.read_csv("/home/silver/PycharmProjects/AAEDRL/DDPG/rl_bal1.csv"))
-df_synth = df_synth.apply(lambda col: col.str.strip("[]").astype(float) if col.dtype == "object" else col)
 
-
-def classifier_train():
-    best_val_loss = 0.3
+# Train classifier
+def classifier_train(train_loader):
     classifier_losses = []
     classifier.train()
 
-    for epoch in range(50):
-        losses = 0
-        num_batches = 0
+    losses = 0
+    num_batches = 0
 
-        for i, (X, y) in enumerate(train_loader):
+    for i, (X, y) in enumerate(train_loader):
+        X = X.float().to(device)
+        y = y.long().squeeze().to(device)
+        optimizer.zero_grad()
+        output_aggregated, _ = classifier.encoder(X)
+        logits, _ = classifier.classify(output_aggregated)
+        loss = torch.nn.functional.cross_entropy(logits, y)
+        loss.backward()
+        optimizer.step()
+        losses += loss.item()
+        num_batches += 1
+
+    avg_loss = losses / num_batches
+    print(f'T Loss: {avg_loss:.4f}')
+
+    classifier_losses.append(avg_loss)
+    return classifier_losses
+
+# Evaluate classifier
+def classifier_val(val_loader):
+    classifier.eval()
+    val_loss = 0
+    num_batches = 0
+    with torch.no_grad():
+        for X, y in val_loader:
             X = X.float().to(device)
             y = y.long().squeeze().to(device)
-            optimizer.zero_grad()
             output_aggregated, _ = classifier.encoder(X)
-            logits, _ = classifier.classify(output_aggregated)
-            loss = torch.nn.functional.cross_entropy(logits, y)
-            loss.backward()
-            optimizer.step()
-            losses += loss.item()
+            logits, predictions = classifier.classify(output_aggregated)
+            val_loss += torch.nn.functional.cross_entropy(logits, y).item()
             num_batches += 1
+            # val_correct += (predictions.argmax(1) == y).sum().item()
+            # val_total += y.size(0)
 
-        avg_loss = losses / num_batches
-        print(f'Epoch [{epoch+1}/{50}], Loss: {avg_loss:.4f}')
+    avg_loss = val_loss / num_batches
 
-        classifier_losses.append(avg_loss)
-        classifier.eval()
-        val_loss = 0
-        val_correct = 0
-        val_total = 0
-        if epoch % 10 == 0:
-            with torch.no_grad():
-                for X, y in val_loader:
-                    X = X.float().to(device)
-                    y = y.long().squeeze().to(device)
-                    output_aggregated, _ = classifier.encoder(X)
-                    logits, predictions = classifier.classify(output_aggregated)
-                    val_loss += torch.nn.functional.cross_entropy(logits, y).item()
-                    val_correct += (predictions.argmax(1) == y).sum().item()
-                    val_total += y.size(0)
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    torch.save(classifier.state_dict(), 'best_model_rl1.pth')
+    print(f'Val Loss: {avg_loss:.4f}')
+    return avg_loss
 
-            val_loss /= len(val_loader)
-
-            print(f'Val Loss: {val_loss:.4f}')
-    # return loss
-
-
-def gen_labels():
-    checkpoint = torch.load('best_model_rl1.pth', map_location=torch.device("cpu"))
+# generate labels
+def gen_labels(state_dictionary, df_synth, batch_size):
+    checkpoint = torch.load(f'{state_dictionary}', map_location=torch.device("cpu"))
     classifier.load_state_dict(checkpoint)
     classifier.eval()
 
     labels_list = []
     confidence_scores = []
-    batch_size = 32
+    df_synth = pd.read_csv(df_synth)
+    df_synth = df_synth.apply(lambda col: col.str.strip("[]").astype(float) if col.dtype == "object" else col)
     X = torch.tensor(df_synth.values, dtype=torch.float32).to(device)
 
     with torch.no_grad():
@@ -313,15 +307,10 @@ def gen_labels():
     confidence_scores = torch.cat(confidence_scores)
 
     return pseudo_labels, confidence_scores
-# labels, cl = gen_labels()
-# labels = labels.detach().cpu().numpy()
-# labels = pd.DataFrame(labels, columns=["attack_cat"])
-# cl = pd.DataFrame(cl, columns=["confidence"])
-# gen = pd.concat([labels, cl], axis=1)
-# gen.to_csv("labels_rl1.csv", index=False)
 
-def classifier_test():
-    checkpoint = torch.load('best_model_rl.pth', map_location=torch.device("cpu"))
+# Test classifier
+def classifier_test(state_dictionary, test_loader):
+    checkpoint = torch.load(f'{state_dictionary}', map_location=torch.device("cpu"))
     classifier.load_state_dict(checkpoint)
     classifier.eval()
     total_loss = 0
