@@ -1,16 +1,14 @@
-import pandas as pd
+"""-------------------------------------------------import libraries-------------------------------------------------"""
 from torch.optim import SGD
-
 import utils
 from AAE import AAE_archi_opt
 import os
-import numpy as np
 import torch
 from torch.nn.functional import binary_cross_entropy, one_hot
-
 from torch import cuda
 import itertools
-from data import main_u
+
+# check cuda and empty caches
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ['TORCH_USE_CUDA_DSA'] = "1"
 
@@ -19,28 +17,20 @@ torch.cuda.empty_cache()
 torch.manual_seed(0)
 
 
-"""--------------------------------------------------dataset and models--------------------------------------------------"""
+"""------------------------------------------------dataset and models------------------------------------------------"""
 in_out = 30
 z_dim = 10
 label_dim = 4
 
-
-dataset = utils.dataset(original=False, train=False)
-test_loader =utils.dataset_function(dataset, 32, 64, train=False)
-
-
 encoder_generator = AAE_archi_opt.EncoderGenerator(in_out, z_dim).cuda() if cuda else (
     AAE_archi_opt.EncoderGenerator(in_out, z_dim))
-encoder_generator.load_state_dict(torch.load("aae_fin.pth")["enc_gen"])
 
 
 decoder = AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary).cuda() if cuda \
     else (AAE_archi_opt.Decoder(z_dim+label_dim, in_out, utils.discrete, utils.continuous, utils.binary))
-decoder.load_state_dict(torch.load("aae_fin.pth")["dec"])
 
 discriminator = AAE_archi_opt.Discriminator(z_dim, ).cuda() if cuda else (
     AAE_archi_opt.Discriminator(z_dim, ))
-discriminator.load_state_dict(torch.load("aae_fin.pth")["disc"])
 
 
 optimizer_G = SGD(itertools.chain(encoder_generator.parameters(), decoder.parameters()),
@@ -48,7 +38,12 @@ optimizer_G = SGD(itertools.chain(encoder_generator.parameters(), decoder.parame
 optimizer_D = SGD(discriminator.parameters(), lr=0.001)
 
 
-def test_model(test_loader):
+def test_model(test_loader, aae_path):
+    # load state dicts
+    encoder_generator.load_state_dict(torch.load(f"{aae_path}")["enc_gen"])
+    decoder.load_state_dict(torch.load(f"{aae_path}")["dec"])
+    discriminator.load_state_dict(torch.load(f"{aae_path}")["disc"])
+
     encoder_generator.eval()
     decoder.eval()
     discriminator.eval()
@@ -103,7 +98,5 @@ def test_model(test_loader):
         avg_g_loss = total_g_loss / len(test_loader)
         avg_d_loss = total_d_loss / len(test_loader)
 
-    return {
-        'g_loss': avg_g_loss,
-        'd_loss': avg_d_loss
-    }
+    return avg_g_loss, avg_d_loss
+
