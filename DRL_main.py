@@ -62,7 +62,7 @@ if __name__ == "__main__":
                                      args.max_timestep, args.batch_size_train, args.eval_freq,
                                      args.start_timestep, args.max_ep_steps, args.actor_path, args.critic_path).train()
 
-        # Generate samples
+        # Convert from torch tensor to numpy array
         d_dict = {key: tensor.detach().cpu().numpy() for key, tensor in d.items()}
         c_dict = {key: tensor.detach().cpu().numpy() for key, tensor in c.items()}
         b_dict = {key: tensor.detach().cpu().numpy() for key, tensor in b.items()}
