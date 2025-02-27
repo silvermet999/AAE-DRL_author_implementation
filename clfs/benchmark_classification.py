@@ -9,8 +9,16 @@ from sklearn.model_selection import cross_val_predict
 
 from sklearn.neighbors import KNeighborsClassifier
 
+"""
+Benchmark classification
+------------------------
+The parameters are defined according to the results of the OPTUNA trials.
+The commented parameters are for the unaugmented data!
+The defined parameters are for the augmented data!
+"""
 
 def clf_class(X_train, X_test, y_train, y_test, xgb_clf=False, KNN_clf=False, rf_clf=False):
+    # Choose one of the classifiers
     if xgb_clf:
         print("using XGB")
         best_params = {'booster': 'gbtree', 'lambda': 0.27402306472106963, 'alpha': 1.0337469639524462e-07,
@@ -33,11 +41,16 @@ def clf_class(X_train, X_test, y_train, y_test, xgb_clf=False, KNN_clf=False, rf
         print("using GB")
         clf = GradientBoostingClassifier(n_estimators=15, learning_rate=0.08372870472978572, max_depth=12) # 'n_estimators': 26, 'learning_rate': 0.03515322582815399, 'max_depth': 10
 
+    # Fit and predict with the training set (5 folds cross-validation)
     clf.fit(X_train, y_train)
     y_pred = cross_val_predict(clf, X_train, y_train, cv=5, method="predict_proba")
     y_pred_max = np.argmax(y_pred, axis=1)
-    report_train = classification_report(y_train, y_pred_max)
+    report_train = classification_report(y_train, y_pred_max) # You can print it
+
+    # Predict with the test set
     y_proba = clf.predict_proba(X_test)
+    # AUC
+    # We need to convert the labels to binary
     lb = LabelBinarizer()
     y_test_binarized = lb.fit_transform(y_test)
     auc_scores = []
@@ -48,7 +61,7 @@ def clf_class(X_train, X_test, y_train, y_test, xgb_clf=False, KNN_clf=False, rf
     macro_auc = roc_auc_score(y_test_binarized, y_proba, average="macro")
     print(f"Macro-Average AUC-ROC: {macro_auc:.4f}")
 
-
+    # Predict and print the classification report
     if xgb_clf:
         dtrain = xgb.DMatrix(X_train, label=y_train)
         dvalid = xgb.DMatrix(X_test, label=y_test)
