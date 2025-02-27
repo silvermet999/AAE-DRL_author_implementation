@@ -67,6 +67,7 @@ if __name__ == "__main__":
         c_dict = {key: tensor.detach().cpu().numpy() for key, tensor in c.items()}
         b_dict = {key: tensor.detach().cpu().numpy() for key, tensor in b.items()}
 
+        # Round discrete and binary feature values
         d_max = {key: np.argmax(value, axis=1) for key, value in d_dict.items()}
         b_max = {key: np.argmax(value, axis=1) for key, value in b_dict.items()}
 
